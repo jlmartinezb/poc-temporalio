@@ -1,0 +1,63 @@
+services:
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-port", "8233"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+
+  
+  worker:
+    build:
+      context: .
+      dockerfile: terminos_y_condiciones.Dockerfile
+    depends_on:
+      - temporal
+      - control_plane
+    environment:
+      - TEMPORAL_SERVER=temporal:7233
+      - CONTROL_PLANE_URL=http://control_plane:8010
+      - WORKER_HEARTBEAT_SEC=5
+      - WORKER_VERSION=dev
+    volumes:
+      - ./terminos_y_condiciones:/app/terminos_y_condiciones
+
+  api_gateway:
+    build:
+      context: .
+      dockerfile: api_gateway.Dockerfile
+    depends_on:
+      - temporal
+    ports:
+      - "8000:8000"
+    environment:
+      - TEMPORAL_SERVER=temporal:7233
+    volumes:
+      - ./api_gateway:/app/api_gateway
+      - ./terminos_y_condiciones:/app/terminos_y_condiciones
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  control_plane:
+    build:
+      context: .
+      dockerfile: control_plane.Dockerfile
+    depends_on:
+      - temporal
+      - api_gateway
+    ports:
+      - "8010:8010"
+    environment:
+      - TEMPORAL_SERVER=temporal:7233
+      - GATEWAY_URL=http://api_gateway:8000
+    volumes:
+      - ./control_plane:/app/control_plane
+    command: ["uvicorn", "control_plane.service:app", "--host", "0.0.0.0", "--port", "8010"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

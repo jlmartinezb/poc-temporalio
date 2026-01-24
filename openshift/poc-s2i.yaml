@@ -1,0 +1,274 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: poc-temporal
+  labels:
+    app: poc-temporal
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: poc-temporal
+  labels:
+    app: poc-temporal
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Source
+    sourceStrategy:
+      from:
+        kind: ImageStreamTag
+        name: python:3.10-ubi8
+        namespace: openshift
+  output:
+    to:
+      kind: ImageStreamTag
+      name: poc-temporal:latest
+---
+apiVersion: apps.openshift.io/v1
+kind: DeploymentConfig
+metadata:
+  name: temporal
+  labels:
+    app: poc-temporal
+    component: temporal
+spec:
+  replicas: 1
+  selector:
+    app: poc-temporal
+    component: temporal
+  template:
+    metadata:
+      labels:
+        app: poc-temporal
+        component: temporal
+    spec:
+      containers:
+        - name: temporal
+          image: temporalio/temporal:latest
+          imagePullPolicy: Always
+          command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-port", "8233"]
+          ports:
+            - containerPort: 7233
+            - containerPort: 8233
+  triggers:
+    - type: ConfigChange
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  labels:
+    app: poc-temporal
+    component: temporal
+spec:
+  selector:
+    app: poc-temporal
+    component: temporal
+  ports:
+    - name: grpc
+      port: 7233
+      targetPort: 7233
+    - name: ui
+      port: 8233
+      targetPort: 8233
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: temporal-ui
+  labels:
+    app: poc-temporal
+    component: temporal
+spec:
+  to:
+    kind: Service
+    name: temporal
+  port:
+    targetPort: ui
+---
+apiVersion: apps.openshift.io/v1
+kind: DeploymentConfig
+metadata:
+  name: api-gateway
+  labels:
+    app: poc-temporal
+    component: api-gateway
+spec:
+  replicas: 1
+  selector:
+    app: poc-temporal
+    component: api-gateway
+  template:
+    metadata:
+      labels:
+        app: poc-temporal
+        component: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: poc-temporal:latest
+          imagePullPolicy: Always
+          command: ["uvicorn", "api_gateway.service:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          env:
+            - name: TEMPORAL_SERVER
+              value: temporal:7233
+  triggers:
+    - type: ConfigChange
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+          - api-gateway
+        from:
+          kind: ImageStreamTag
+          name: poc-temporal:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  labels:
+    app: poc-temporal
+    component: api-gateway
+spec:
+  selector:
+    app: poc-temporal
+    component: api-gateway
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: api-gateway
+  labels:
+    app: poc-temporal
+    component: api-gateway
+spec:
+  to:
+    kind: Service
+    name: api-gateway
+  port:
+    targetPort: http
+---
+apiVersion: apps.openshift.io/v1
+kind: DeploymentConfig
+metadata:
+  name: control-plane
+  labels:
+    app: poc-temporal
+    component: control-plane
+spec:
+  replicas: 1
+  selector:
+    app: poc-temporal
+    component: control-plane
+  template:
+    metadata:
+      labels:
+        app: poc-temporal
+        component: control-plane
+    spec:
+      containers:
+        - name: control-plane
+          image: poc-temporal:latest
+          imagePullPolicy: Always
+          command: ["uvicorn", "control_plane.service:app", "--host", "0.0.0.0", "--port", "8010"]
+          ports:
+            - containerPort: 8010
+          env:
+            - name: TEMPORAL_SERVER
+              value: temporal:7233
+            - name: GATEWAY_URL
+              value: http://api-gateway:8000
+  triggers:
+    - type: ConfigChange
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+          - control-plane
+        from:
+          kind: ImageStreamTag
+          name: poc-temporal:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  labels:
+    app: poc-temporal
+    component: control-plane
+spec:
+  selector:
+    app: poc-temporal
+    component: control-plane
+  ports:
+    - name: http
+      port: 8010
+      targetPort: 8010
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: control-plane
+  labels:
+    app: poc-temporal
+    component: control-plane
+spec:
+  to:
+    kind: Service
+    name: control-plane
+  port:
+    targetPort: http
+---
+apiVersion: apps.openshift.io/v1
+kind: DeploymentConfig
+metadata:
+  name: worker
+  labels:
+    app: poc-temporal
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    app: poc-temporal
+    component: worker
+  template:
+    metadata:
+      labels:
+        app: poc-temporal
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: poc-temporal:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "terminos_y_condiciones.run_worker"]
+          env:
+            - name: TEMPORAL_SERVER
+              value: temporal:7233
+            - name: CONTROL_PLANE_URL
+              value: http://control-plane:8010
+            - name: WORKER_HEARTBEAT_SEC
+              value: "5"
+            - name: WORKER_VERSION
+              value: dev
+            - name: ENVIO_API_URL
+              value: http://api-gateway:8000/envio/despachar
+  triggers:
+    - type: ConfigChange
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+          - worker
+        from:
+          kind: ImageStreamTag
+          name: poc-temporal:latest

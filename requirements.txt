@@ -1,0 +1,4 @@
+temporalio
+httpx
+fastapi
+uvicorn[standard]
