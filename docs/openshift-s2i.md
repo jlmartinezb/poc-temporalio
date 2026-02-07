@@ -27,10 +27,10 @@ oc new-project poc-temporal
 oc apply -f openshift/poc-s2i.yaml
 ```
 
-3) Lanzar build desde tu repo local (binary build):
+3) Lanzar build desde el repo Git (build remoto):
 
 ```bash
-oc start-build poc-temporal --from-dir=. --follow
+oc start-build poc-temporal --follow
 ```
 
 4) Verificar rutas:

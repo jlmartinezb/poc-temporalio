@@ -13,13 +13,17 @@ metadata:
     app: poc-temporal
 spec:
   source:
-    type: Binary
+    type: Git
+    git:
+      uri: https://github.com/jlmartinezb/poc-temporalio.git
+      ref: main
+    contextDir: .
   strategy:
     type: Source
     sourceStrategy:
       from:
         kind: ImageStreamTag
-        name: python:3.10-ubi8
+        name: python:3.11-ubi9
         namespace: openshift
   output:
     to:
@@ -48,7 +52,7 @@ spec:
         - name: temporal
           image: temporalio/temporal:latest
           imagePullPolicy: Always
-          command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-port", "8233"]
+          command: ["temporal", "server", "start-dev", "--ip", "0.0.0.0", "--ui-port", "8233"]
           ports:
             - containerPort: 7233
             - containerPort: 8233
